@@ -5,6 +5,62 @@ from torch_geometric.data import Data
 from torch.nn import functional as F
 import torch.nn as nn
 
+from typing import Protocol
+import torch
+from gft_torch.gft import GFT
+
+
+class GATv1(nn.Module):
+    def __init__(self, num_features, num_classes):
+        super(GATv1, self).__init__()
+
+        self.conv1 = GATConv(
+            in_channels=num_features, out_channels=64, heads=1, dropout=0.6
+        )
+
+        self.conv2 = GATConv(
+            in_channels=64, out_channels=num_classes, heads=1, dropout=0.6
+        )
+
+    def forward(self, data: Data):
+        x, edge_index = data.x, data.edge_index
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = self.conv1(x, edge_index)
+        x = F.elu(x)
+        x = F.dropout(x, p=0.6, training=self.training)
+        x = self.conv2(x, edge_index)
+        out = F.log_softmax(x, dim=1)
+        return out
+
+
+class GATConvProtocol(Protocol):
+    in_channels: int
+    out_channels: int
+    negative_slope: float
+    dropout: float
+
+
+class GATvX(nn.Module):
+    def __init__(self, n_feats: int, n_class: int, gat_conv: GATConvProtocol, gft: GFT):
+        super(GATvX, self).__init__()
+        self.gft = gft
+        self.conv_layers = nn.Sequential(
+            *[
+                gat_conv(in_channels=n_feats, out_channels=64, dropout=0.6),
+                gat_conv(in_channels=64, out_channels=n_class, dropout=0.6),
+            ]
+        )
+
+    def forward(self, X, A):
+        for i, conv in enumerate(self.conv_layers):
+            X = F.dropout(X, p=0.6, training=self.training)
+            X = conv(X, A, gft=self.gft)
+            if i != len(self.conv_layers) - 1:
+                X = F.elu(X)
+
+        out = F.log_softmax(X, dim=1)
+        return out
+
 
 class GATConv3(nn.Module):
     def __init__(
